@@ -1,0 +1,73 @@
+name: orderflow
+
+# MinIO stands in for S3 locally. It speaks the same API, so the archive code
+# path is the real one rather than a local-only branch that rots untested.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./docker/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
+    ports:
+      # Published high so the stack does not collide with a Postgres the
+      # reader already runs on 5432. In-network, Airflow still uses 5432.
+      - "55432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U airflow"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  minio:
+    # quay.io, not Docker Hub: MinIO no longer publishes the server image there.
+    image: quay.io/minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    volumes:
+      - minio-data:/data
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # web console
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  airflow:
+    build: .
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres:5432/airflow
+      PYTHONPATH: /opt/airflow
+      ORDERFLOW_DATABASE_URL: postgresql+psycopg2://orderflow:orderflow@postgres:5432/orderflow
+      ORDERFLOW_S3_ENDPOINT_URL: http://minio:9000
+      ORDERFLOW_S3_BUCKET: orderflow-raw
+      AWS_ACCESS_KEY_ID: minioadmin
+      AWS_SECRET_ACCESS_KEY: minioadmin
+      AWS_DEFAULT_REGION: us-east-1
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./orderflow:/opt/airflow/orderflow
+      - airflow-logs:/opt/airflow/logs
+    ports:
+      - "8080:8080"
+    command: standalone
+
+volumes:
+  postgres-data:
+  minio-data:
+  airflow-logs:

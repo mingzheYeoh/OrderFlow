@@ -1,0 +1,10 @@
+# For running the pipeline outside Airflow (`python -m orderflow`) and for tests.
+#
+# Deliberately NOT installed into the Airflow image: that image already ships
+# SQLAlchemy, requests and psycopg2, and letting pip resolve these freely there
+# upgrades SQLAlchemy out from under Airflow. See the Dockerfile.
+requests>=2.32
+SQLAlchemy>=1.4
+psycopg2-binary>=2.9
+boto3>=1.34
+pytest>=8.0
